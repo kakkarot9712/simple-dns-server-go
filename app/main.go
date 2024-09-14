@@ -42,14 +42,20 @@ func main() {
 		msg := message{}
 		// 1234 Big-endian
 		id := [2]byte{0x04, 0xD2}
-
-		QDCOUNT := [2]byte{0x0, 0x0}
+		QR := true
+		AA := false
+		RD := false
+		RA := false
+		var questions uint16 = 1
 		ANCOUNT := [2]byte{0x0, 0x0}
 		NSCOUNT := [2]byte{0x0, 0x0}
 		ARCOUNT := [2]byte{0x0, 0x0}
+		msg.FillHeader(id, QR, AA, RD, RA, questions, ANCOUNT, NSCOUNT, ARCOUNT)
 
-		msg.FillHeader(id, true, false, false, false, QDCOUNT, ANCOUNT, NSCOUNT, ARCOUNT)
-		// Create an empty response
+		domainName := "codecrafters.io"
+		record := A
+		msg.FillQuestion(domainName, record)
+
 		response := msg.Bytes()
 
 		_, err = udpConn.WriteToUDP(response, source)
