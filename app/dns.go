@@ -19,7 +19,7 @@ const (
 
 type message struct {
 	header   Header
-	question Question
+	question []Question
 	Answer   []byte
 }
 
@@ -94,29 +94,61 @@ func ParseHeader(buff []byte) Header {
 	return h
 }
 
-func ParseQuestion(buff []byte) Question {
+func ParseQuestion(buff []byte) []Question {
 	labels := []string{}
+	questions := []Question{}
 	pointer := 0
+	oldPointer := 0
 	for {
+		b := getOctetFromByte(buff[pointer])
 		labelLength := int(buff[pointer])
 		pointer++
-		labels = append(labels, string(buff[pointer:pointer+labelLength]))
-		pointer += labelLength
+		labelBytes := []byte{}
+		// labels = append(labels, string(buff[pointer:pointer+labelLength]))
+		legthProcessed := 0
+		for {
+			if b[:2] != "11" {
+				labelBytes = append(labelBytes, buff[pointer])
+				pointer++
+				legthProcessed++
+			} else {
+				bits := b[2:] + getOctetFromByte(buff[pointer])
+				pointer++
+				offset, err := strconv.ParseUint(bits, 2, 8)
+				if err != nil {
+					panic(err)
+				}
+				oldPointer = pointer
+				pointer = int(offset) - 12
+				break
+			}
+			if legthProcessed == labelLength {
+				labels = append(labels, string(labelBytes))
+				labelBytes = []byte{}
+				break
+			}
+		}
 		if buff[pointer] == byte(0) {
-			pointer++
+			if oldPointer != 0 {
+				pointer = oldPointer
+			} else {
+				pointer++
+			}
+			record := binary.BigEndian.Uint16(buff[pointer : pointer+2])
+			class := binary.BigEndian.Uint16(buff[pointer+2 : pointer+4])
+			pointer += 4
+			questions = append(questions, Question{
+				Name:  strings.Join(labels, "."),
+				Type:  recordType(record),
+				Class: class,
+			})
+			labels = []string{}
+		}
+		if pointer >= len(buff) {
 			break
 		}
 	}
-	record := binary.BigEndian.Uint16(buff[pointer : pointer+2])
-	class := binary.BigEndian.Uint16(buff[pointer+2 : pointer+4])
-	return Question{
-		Name:  strings.Join(labels, "."),
-		Type:  recordType(record),
-		Class: class,
-	}
-}
-
-func (h *message) FillQuestion(name string, record recordType) {
+	return questions
 }
 
 func (m *message) Bytes() []byte {
@@ -201,15 +233,17 @@ func (m *message) Bytes() []byte {
 	binary.BigEndian.PutUint16(ARCOUNTSBytes, header.ARCOunt)
 	headerBytes = append(headerBytes, ARCOUNTSBytes...)
 
-	question := m.question
-
-	QuestionBytes := []byte{}
-	QuestionBytes = append(QuestionBytes, getLabelSequence(question.Name)...)
-	QuestionBytes = append(QuestionBytes, []byte{0x0, byte(question.Type), 0x0, 0x1}...)
-
 	msg := []byte{}
 	msg = append(msg, headerBytes...)
-	msg = append(msg, QuestionBytes...)
+
+	question := m.question
+	for _, que := range question {
+		QuestionBytes := []byte{}
+		QuestionBytes = append(QuestionBytes, getLabelSequence(que.Name)...)
+		QuestionBytes = append(QuestionBytes, []byte{0x0, byte(que.Type), 0x0, 0x1}...)
+		msg = append(msg, QuestionBytes...)
+	}
+
 	msg = append(msg, m.Answer...)
 	return msg
 }

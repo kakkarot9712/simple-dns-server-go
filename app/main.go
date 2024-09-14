@@ -38,7 +38,7 @@ func main() {
 		}
 
 		header := ParseHeader(buf[:12])
-		question := ParseQuestion(buf[12:])
+		question := ParseQuestion(buf[12:size])
 
 		msg := message{}
 
@@ -49,14 +49,16 @@ func main() {
 			AA:        false,
 			RD:        header.RD,
 			Questions: header.Questions,
-			Answers:   1,
+			Answers:   2,
 			NSCOUNT:   0,
 			ARCOunt:   0,
 		}
 
 		msg.question = question
 		ipAddress := "8.8.8.8"
-		msg.FillAnswer(question.Name, question.Type, 60, ipAddress)
+		for _, q := range question {
+			msg.FillAnswer(q.Name, q.Type, 60, ipAddress)
+		}
 
 		response := msg.Bytes()
 		_, err = udpConn.WriteToUDP(response, source)
