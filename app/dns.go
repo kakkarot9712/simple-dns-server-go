@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"strconv"
 	"strings"
 )
@@ -18,9 +19,27 @@ const (
 type message struct {
 	header   [12]byte
 	Question []byte
+	Answer   []byte
 }
 
-func (h *message) FillHeader(id [2]byte, QR bool, AA bool, RD bool, RA bool, questions uint16, ANCOUNT [2]byte, NSCOUNT [2]byte, ARCOUNT [2]byte) {
+// type DNS struct {
+// 	name   string
+// 	record recordType
+// 	msg message
+// }
+
+func getLabelSequence(name string) []byte {
+	seq := []byte{}
+	labels := strings.Split(name, ".")
+	for _, l := range labels {
+		seq = append(seq, byte(len(l)))
+		seq = append(seq, []byte(l)...)
+	}
+	seq = append(seq, []byte{0x0}...)
+	return seq
+}
+
+func (h *message) FillHeader(id [2]byte, QR bool, AA bool, RD bool, RA bool, questions uint16, answers uint16, NSCOUNT [2]byte, ARCOUNT [2]byte) {
 	header := [12]byte{}
 	// 16 bits => 2 bytes for id
 	header[0] = id[0]
@@ -79,17 +98,15 @@ func (h *message) FillHeader(id [2]byte, QR bool, AA bool, RD bool, RA bool, que
 
 	header[3] = byte(b)
 
-	queBytes := []byte(string(questions))
-	if len(queBytes) == 1 {
-		header[4] = byte(0x0)
-		header[5] = queBytes[0]
-	} else {
-		header[4] = queBytes[0]
-		header[5] = queBytes[1]
-	}
+	queBytes := make([]byte, 2)
+	binary.BigEndian.PutUint16(queBytes, questions)
+	header[4] = queBytes[0]
+	header[5] = queBytes[1]
 
-	header[6] = ANCOUNT[0]
-	header[7] = ANCOUNT[1]
+	ansBytes := make([]byte, 2)
+	binary.BigEndian.PutUint16(ansBytes, answers)
+	header[6] = ansBytes[0]
+	header[7] = ansBytes[1]
 
 	header[8] = NSCOUNT[0]
 	header[9] = NSCOUNT[1]
@@ -101,12 +118,7 @@ func (h *message) FillHeader(id [2]byte, QR bool, AA bool, RD bool, RA bool, que
 }
 
 func (h *message) FillQuestion(name string, record recordType) {
-	labels := strings.Split(name, ".")
-	for _, l := range labels {
-		h.Question = append(h.Question, byte(len(l)))
-		h.Question = append(h.Question, []byte(l)...)
-	}
-	h.Question = append(h.Question, []byte{0x0}...)
+	h.Question = append(h.Question, getLabelSequence(name)...)
 	h.Question = append(h.Question, []byte{0x0, byte(record), 0x0, 0x1}...)
 }
 
@@ -114,5 +126,35 @@ func (m *message) Bytes() []byte {
 	msg := []byte{}
 	msg = append(msg, m.header[:]...)
 	msg = append(msg, m.Question...)
+	msg = append(msg, m.Answer...)
 	return msg
+}
+
+func (m *message) FillAnswer(name string, record recordType, TTL uint32, ipAddress string) {
+	m.Answer = append(m.Answer, getLabelSequence(name)...)
+	recordBytes := make([]byte, 2)
+	binary.BigEndian.PutUint16(recordBytes, uint16(record))
+	m.Answer = append(m.Answer, recordBytes...)
+
+	classBytes := make([]byte, 2)
+	binary.BigEndian.PutUint16(classBytes, 1)
+	m.Answer = append(m.Answer, classBytes...)
+
+	TTLBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(TTLBytes, TTL)
+	m.Answer = append(m.Answer, TTLBytes...)
+
+	RDataStr := strings.Split(ipAddress, ".")
+	RData := []byte{}
+	for _, ip := range RDataStr {
+		ipPart, err := strconv.Atoi(ip)
+		if err != nil {
+			panic(err)
+		}
+		RData = append(RData, byte(ipPart))
+	}
+	Length := make([]byte, 2)
+	binary.BigEndian.PutUint16(Length, uint16(len(RData)))
+	m.Answer = append(m.Answer, Length...)
+	m.Answer = append(m.Answer, RData...)
 }

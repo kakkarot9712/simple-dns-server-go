@@ -47,14 +47,17 @@ func main() {
 		RD := false
 		RA := false
 		var questions uint16 = 1
-		ANCOUNT := [2]byte{0x0, 0x0}
+		var answers uint16 = 1
 		NSCOUNT := [2]byte{0x0, 0x0}
 		ARCOUNT := [2]byte{0x0, 0x0}
-		msg.FillHeader(id, QR, AA, RD, RA, questions, ANCOUNT, NSCOUNT, ARCOUNT)
+		msg.FillHeader(id, QR, AA, RD, RA, questions, answers, NSCOUNT, ARCOUNT)
 
 		domainName := "codecrafters.io"
 		record := A
 		msg.FillQuestion(domainName, record)
+
+		ipAddress := "8.8.8.8"
+		msg.FillAnswer(domainName, record, 60, ipAddress)
 
 		response := msg.Bytes()
 
