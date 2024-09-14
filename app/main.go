@@ -35,9 +35,22 @@ func main() {
 
 		receivedData := string(buf[:size])
 		fmt.Printf("Received %d bytes from %s: %s\n", size, source, receivedData)
+		if size == 0 {
+			continue
+		}
 
+		msg := message{}
+		// 1234 Big-endian
+		id := [2]byte{0x04, 0xD2}
+
+		QDCOUNT := [2]byte{0x0, 0x0}
+		ANCOUNT := [2]byte{0x0, 0x0}
+		NSCOUNT := [2]byte{0x0, 0x0}
+		ARCOUNT := [2]byte{0x0, 0x0}
+
+		msg.FillHeader(id, true, false, false, false, QDCOUNT, ANCOUNT, NSCOUNT, ARCOUNT)
 		// Create an empty response
-		response := []byte{}
+		response := msg.Bytes()
 
 		_, err = udpConn.WriteToUDP(response, source)
 		if err != nil {
