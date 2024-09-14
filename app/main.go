@@ -33,24 +33,26 @@ func main() {
 			break
 		}
 
-		receivedData := string(buf[:size])
-		fmt.Printf("Received %d bytes from %s: %s\n", size, source, receivedData)
+		// receivedData := string(buf[:size])
+		// fmt.Printf("Received %d bytes from %s: %s\n", size, source, receivedData)
+		header := ParseHeader(buf[:12])
 		if size == 0 {
 			continue
 		}
 
 		msg := message{}
-		// 1234 Big-endian
-		id := [2]byte{0x04, 0xD2}
-		QR := true
-		AA := false
-		RD := false
-		RA := false
-		var questions uint16 = 1
-		var answers uint16 = 1
-		NSCOUNT := [2]byte{0x0, 0x0}
-		ARCOUNT := [2]byte{0x0, 0x0}
-		msg.FillHeader(id, QR, AA, RD, RA, questions, answers, NSCOUNT, ARCOUNT)
+
+		msg.header = Header{
+			id:        header.id,
+			QR:        true,
+			OPCODE:    header.OPCODE,
+			AA:        false,
+			RD:        header.RD,
+			Questions: header.Questions,
+			Answers:   1,
+			NSCOUNT:   0,
+			ARCOunt:   0,
+		}
 
 		domainName := "codecrafters.io"
 		record := A
@@ -60,7 +62,6 @@ func main() {
 		msg.FillAnswer(domainName, record, 60, ipAddress)
 
 		response := msg.Bytes()
-
 		_, err = udpConn.WriteToUDP(response, source)
 		if err != nil {
 			fmt.Println("Failed to send response:", err)

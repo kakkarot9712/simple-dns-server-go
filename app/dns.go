@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -17,7 +18,7 @@ const (
 )
 
 type message struct {
-	header   [12]byte
+	header   Header
 	Question []byte
 	Answer   []byte
 }
@@ -27,6 +28,20 @@ type message struct {
 // 	record recordType
 // 	msg message
 // }
+
+type Header struct {
+	id        uint16
+	QR        bool
+	OPCODE    string
+	AA        bool
+	RD        bool
+	RA        bool
+	RCODE     string
+	Questions uint16
+	Answers   uint16
+	NSCOUNT   uint16
+	ARCOunt   uint16
+}
 
 func getLabelSequence(name string) []byte {
 	seq := []byte{}
@@ -39,24 +54,67 @@ func getLabelSequence(name string) []byte {
 	return seq
 }
 
-func (h *message) FillHeader(id [2]byte, QR bool, AA bool, RD bool, RA bool, questions uint16, answers uint16, NSCOUNT [2]byte, ARCOUNT [2]byte) {
-	header := [12]byte{}
+func getOctetFromByte(b byte) string {
+	bits := fmt.Sprintf("%b", b)
+	for range 8 - len(bits) {
+		bits = "0" + bits
+	}
+	return bits
+}
+
+func ParseHeader(buff []byte) Header {
+	h := Header{}
+	if len(buff) < 12 {
+		fmt.Println("Invalid Header passed!")
+		return h
+	}
+	h.id = binary.BigEndian.Uint16(buff[:2])
+
+	octet := getOctetFromByte(buff[2])
+
+	h.QR = buff[2]&255 == 1
+	h.OPCODE = octet[1:5]
+	h.AA = buff[2]&4 == 1
+	h.RD = buff[2]&1 == 1
+
+	octet = getOctetFromByte(buff[3])
+	h.RA = buff[3]&255 == 1
+	h.RCODE = octet[4:]
+
+	h.Questions = binary.BigEndian.Uint16(buff[4:6])
+	h.Answers = binary.BigEndian.Uint16(buff[6:8])
+	h.NSCOUNT = binary.BigEndian.Uint16(buff[8:10])
+	h.ARCOunt = binary.BigEndian.Uint16(buff[10:12])
+	return h
+}
+
+func (h *message) FillQuestion(name string, record recordType) {
+	h.Question = append(h.Question, getLabelSequence(name)...)
+	h.Question = append(h.Question, []byte{0x0, byte(record), 0x0, 0x1}...)
+}
+
+func (m *message) Bytes() []byte {
+	header := m.header
+	headerBytes := []byte{}
+	// header := [12]byte{}
 	// 16 bits => 2 bytes for id
-	header[0] = id[0]
-	header[1] = id[1]
+	idBytes := make([]byte, 2)
+	binary.BigEndian.PutUint16(idBytes, header.id)
+	// fmt.Println(idBytes, "IB")
+	headerBytes = append(headerBytes, idBytes...)
 
 	bits := ""
 
-	if QR {
+	if header.QR {
 		bits += "1"
 	} else {
 		bits += "0"
 	}
 
 	// OPCODE
-	bits += "0000"
+	bits += header.OPCODE
 
-	if AA {
+	if header.AA {
 		bits += "1"
 	} else {
 		bits += "0"
@@ -65,7 +123,7 @@ func (h *message) FillHeader(id [2]byte, QR bool, AA bool, RD bool, RA bool, que
 	// TC
 	bits += "0"
 
-	if RD {
+	if header.RD {
 		bits += "1"
 	} else {
 		bits += "0"
@@ -75,11 +133,11 @@ func (h *message) FillHeader(id [2]byte, QR bool, AA bool, RD bool, RA bool, que
 	if err != nil {
 		panic(err)
 	}
-	header[2] = byte(b)
 
+	headerBytes = append(headerBytes, byte(b))
 	bits = ""
 
-	if RA {
+	if header.RA {
 		bits += "1"
 	} else {
 		bits += "0"
@@ -89,42 +147,36 @@ func (h *message) FillHeader(id [2]byte, QR bool, AA bool, RD bool, RA bool, que
 	bits += "000"
 
 	// RCODE
-	bits += "0000"
+	if header.OPCODE == "0000" {
+		bits += "0000"
+	} else {
+		bits += "0100"
+	}
 
 	b, err = strconv.ParseUint(bits, 2, 8)
 	if err != nil {
 		panic(err)
 	}
-
-	header[3] = byte(b)
+	headerBytes = append(headerBytes, byte(b))
 
 	queBytes := make([]byte, 2)
-	binary.BigEndian.PutUint16(queBytes, questions)
-	header[4] = queBytes[0]
-	header[5] = queBytes[1]
+	binary.BigEndian.PutUint16(queBytes, header.Questions)
+	headerBytes = append(headerBytes, queBytes...)
 
 	ansBytes := make([]byte, 2)
-	binary.BigEndian.PutUint16(ansBytes, answers)
-	header[6] = ansBytes[0]
-	header[7] = ansBytes[1]
+	binary.BigEndian.PutUint16(ansBytes, header.Answers)
+	headerBytes = append(headerBytes, ansBytes...)
 
-	header[8] = NSCOUNT[0]
-	header[9] = NSCOUNT[1]
+	NSCountBytes := make([]byte, 2)
+	binary.BigEndian.PutUint16(NSCountBytes, header.NSCOUNT)
+	headerBytes = append(headerBytes, NSCountBytes...)
 
-	header[10] = ARCOUNT[0]
-	header[11] = ARCOUNT[1]
+	ARCOUNTSBytes := make([]byte, 2)
+	binary.BigEndian.PutUint16(ARCOUNTSBytes, header.ARCOunt)
+	headerBytes = append(headerBytes, ARCOUNTSBytes...)
 
-	h.header = header
-}
-
-func (h *message) FillQuestion(name string, record recordType) {
-	h.Question = append(h.Question, getLabelSequence(name)...)
-	h.Question = append(h.Question, []byte{0x0, byte(record), 0x0, 0x1}...)
-}
-
-func (m *message) Bytes() []byte {
 	msg := []byte{}
-	msg = append(msg, m.header[:]...)
+	msg = append(msg, headerBytes...)
 	msg = append(msg, m.Question...)
 	msg = append(msg, m.Answer...)
 	return msg
