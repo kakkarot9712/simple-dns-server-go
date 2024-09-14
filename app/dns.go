@@ -19,7 +19,7 @@ const (
 
 type message struct {
 	header   Header
-	Question []byte
+	question Question
 	Answer   []byte
 }
 
@@ -41,6 +41,12 @@ type Header struct {
 	Answers   uint16
 	NSCOUNT   uint16
 	ARCOunt   uint16
+}
+
+type Question struct {
+	Name  string
+	Type  recordType
+	Class uint16
 }
 
 func getLabelSequence(name string) []byte {
@@ -88,9 +94,29 @@ func ParseHeader(buff []byte) Header {
 	return h
 }
 
+func ParseQuestion(buff []byte) Question {
+	labels := []string{}
+	pointer := 0
+	for {
+		labelLength := int(buff[pointer])
+		pointer++
+		labels = append(labels, string(buff[pointer:pointer+labelLength]))
+		pointer += labelLength
+		if buff[pointer] == byte(0) {
+			pointer++
+			break
+		}
+	}
+	record := binary.BigEndian.Uint16(buff[pointer : pointer+2])
+	class := binary.BigEndian.Uint16(buff[pointer+2 : pointer+4])
+	return Question{
+		Name:  strings.Join(labels, "."),
+		Type:  recordType(record),
+		Class: class,
+	}
+}
+
 func (h *message) FillQuestion(name string, record recordType) {
-	h.Question = append(h.Question, getLabelSequence(name)...)
-	h.Question = append(h.Question, []byte{0x0, byte(record), 0x0, 0x1}...)
 }
 
 func (m *message) Bytes() []byte {
@@ -175,9 +201,15 @@ func (m *message) Bytes() []byte {
 	binary.BigEndian.PutUint16(ARCOUNTSBytes, header.ARCOunt)
 	headerBytes = append(headerBytes, ARCOUNTSBytes...)
 
+	question := m.question
+
+	QuestionBytes := []byte{}
+	QuestionBytes = append(QuestionBytes, getLabelSequence(question.Name)...)
+	QuestionBytes = append(QuestionBytes, []byte{0x0, byte(question.Type), 0x0, 0x1}...)
+
 	msg := []byte{}
 	msg = append(msg, headerBytes...)
-	msg = append(msg, m.Question...)
+	msg = append(msg, QuestionBytes...)
 	msg = append(msg, m.Answer...)
 	return msg
 }

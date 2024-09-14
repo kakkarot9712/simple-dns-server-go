@@ -33,12 +33,12 @@ func main() {
 			break
 		}
 
-		// receivedData := string(buf[:size])
-		// fmt.Printf("Received %d bytes from %s: %s\n", size, source, receivedData)
-		header := ParseHeader(buf[:12])
 		if size == 0 {
 			continue
 		}
+
+		header := ParseHeader(buf[:12])
+		question := ParseQuestion(buf[12:])
 
 		msg := message{}
 
@@ -54,12 +54,9 @@ func main() {
 			ARCOunt:   0,
 		}
 
-		domainName := "codecrafters.io"
-		record := A
-		msg.FillQuestion(domainName, record)
-
+		msg.question = question
 		ipAddress := "8.8.8.8"
-		msg.FillAnswer(domainName, record, 60, ipAddress)
+		msg.FillAnswer(question.Name, question.Type, 60, ipAddress)
 
 		response := msg.Bytes()
 		_, err = udpConn.WriteToUDP(response, source)
