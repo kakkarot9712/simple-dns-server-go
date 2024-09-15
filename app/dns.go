@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 )
@@ -18,19 +19,13 @@ const (
 )
 
 type message struct {
-	header   Header
-	question []Question
-	Answer   []byte
+	header   header
+	question []question
+	Answer   []answer
 }
 
-// type DNS struct {
-// 	name   string
-// 	record recordType
-// 	msg message
-// }
-
-type Header struct {
-	id        uint16
+type header struct {
+	Id        uint16
 	QR        bool
 	OPCODE    string
 	AA        bool
@@ -43,10 +38,28 @@ type Header struct {
 	ARCOunt   uint16
 }
 
-type Question struct {
-	Name  string
-	Type  recordType
-	Class uint16
+type question struct {
+	Id     int
+	Header header
+	Name   string
+	Type   recordType
+	Class  uint16
+}
+
+type answer struct {
+	Uid            int
+	ResponseHeader header
+	Name           string
+	Type           recordType
+	TTL            uint32
+	Data           string
+}
+
+type DNSMessage struct {
+	source    *net.UDPAddr
+	questions []question
+	id        uint16
+	header    header
 }
 
 func getLabelSequence(name string) []byte {
@@ -68,13 +81,13 @@ func getOctetFromByte(b byte) string {
 	return bits
 }
 
-func ParseHeader(buff []byte) Header {
-	h := Header{}
+func ParseHeader(buff []byte) header {
+	h := header{}
 	if len(buff) < 12 {
 		fmt.Println("Invalid Header passed!")
 		return h
 	}
-	h.id = binary.BigEndian.Uint16(buff[:2])
+	h.Id = binary.BigEndian.Uint16(buff[:2])
 
 	octet := getOctetFromByte(buff[2])
 
@@ -94,25 +107,23 @@ func ParseHeader(buff []byte) Header {
 	return h
 }
 
-func ParseQuestion(buff []byte) []Question {
+func ParseLabels(buff *[]byte, pointer int) ([]string, int) {
 	labels := []string{}
-	questions := []Question{}
-	pointer := 0
 	oldPointer := 0
 	for {
-		b := getOctetFromByte(buff[pointer])
-		labelLength := int(buff[pointer])
+		b := getOctetFromByte((*buff)[pointer])
+		labelLength := int((*buff)[pointer])
 		pointer++
 		labelBytes := []byte{}
 		// labels = append(labels, string(buff[pointer:pointer+labelLength]))
 		legthProcessed := 0
 		for {
 			if b[:2] != "11" {
-				labelBytes = append(labelBytes, buff[pointer])
+				labelBytes = append(labelBytes, (*buff)[pointer])
 				pointer++
 				legthProcessed++
 			} else {
-				bits := b[2:] + getOctetFromByte(buff[pointer])
+				bits := b[2:] + getOctetFromByte((*buff)[pointer])
 				pointer++
 				offset, err := strconv.ParseUint(bits, 2, 8)
 				if err != nil {
@@ -124,41 +135,82 @@ func ParseQuestion(buff []byte) []Question {
 			}
 			if legthProcessed == labelLength {
 				labels = append(labels, string(labelBytes))
-				labelBytes = []byte{}
 				break
 			}
 		}
-		if buff[pointer] == byte(0) {
+		if (*buff)[pointer] == byte(0) {
 			if oldPointer != 0 {
 				pointer = oldPointer
 			} else {
 				pointer++
 			}
-			record := binary.BigEndian.Uint16(buff[pointer : pointer+2])
-			class := binary.BigEndian.Uint16(buff[pointer+2 : pointer+4])
-			pointer += 4
-			questions = append(questions, Question{
-				Name:  strings.Join(labels, "."),
-				Type:  recordType(record),
-				Class: class,
-			})
-			labels = []string{}
-		}
-		if pointer >= len(buff) {
-			break
+			return labels, pointer
 		}
 	}
-	return questions
+}
+
+func ParseAnswer(buff []byte, pointer int) ([]answer, int) {
+	answers := []answer{}
+	for {
+		labels, newPointer := ParseLabels(&buff, pointer)
+		pointer = newPointer
+		record := binary.BigEndian.Uint16(buff[pointer : pointer+2])
+		pointer += 2
+		// Skip class
+		// class := binary.BigEndian.Uint16(buff[pointer : pointer+2])
+		pointer += 2
+		TTL := binary.BigEndian.Uint32(buff[pointer : pointer+4])
+		pointer += 4
+		Length := binary.BigEndian.Uint16(buff[pointer : pointer+2])
+		pointer += 2
+		Data := buff[pointer : pointer+int(Length)]
+		ipAddresss := []string{}
+		for _, ip := range Data {
+			numStr := fmt.Sprintf("%v", ip)
+			ipAddresss = append(ipAddresss, numStr)
+		}
+		pointer += int(Length)
+		answers = append(answers, answer{
+			Name: strings.Join(labels, "."),
+			Type: recordType(record),
+			TTL:  TTL,
+			Data: strings.Join(ipAddresss, "."),
+		})
+		if pointer >= len(buff) {
+			return answers, pointer
+		}
+	}
+}
+
+func ParseQuestion(buff []byte, questionLenght int) ([]question, int) {
+	questions := []question{}
+	pointer := 0
+	if questionLenght == 0 {
+		return questions, pointer
+	}
+	for {
+		labels, newPointer := ParseLabels(&buff, pointer)
+		pointer = newPointer
+		record := binary.BigEndian.Uint16(buff[pointer : pointer+2])
+		class := binary.BigEndian.Uint16(buff[pointer+2 : pointer+4])
+		pointer += 4
+		questions = append(questions, question{
+			Name:  strings.Join(labels, "."),
+			Type:  recordType(record),
+			Class: class,
+		})
+		if questionLenght == len(questions) {
+			return questions, pointer
+		}
+	}
 }
 
 func (m *message) Bytes() []byte {
 	header := m.header
 	headerBytes := []byte{}
-	// header := [12]byte{}
 	// 16 bits => 2 bytes for id
 	idBytes := make([]byte, 2)
-	binary.BigEndian.PutUint16(idBytes, header.id)
-	// fmt.Println(idBytes, "IB")
+	binary.BigEndian.PutUint16(idBytes, header.Id)
 	headerBytes = append(headerBytes, idBytes...)
 
 	bits := ""
@@ -244,35 +296,39 @@ func (m *message) Bytes() []byte {
 		msg = append(msg, QuestionBytes...)
 	}
 
-	msg = append(msg, m.Answer...)
-	return msg
-}
+	AnswerBytes := []byte{}
 
-func (m *message) FillAnswer(name string, record recordType, TTL uint32, ipAddress string) {
-	m.Answer = append(m.Answer, getLabelSequence(name)...)
-	recordBytes := make([]byte, 2)
-	binary.BigEndian.PutUint16(recordBytes, uint16(record))
-	m.Answer = append(m.Answer, recordBytes...)
+	answers := m.Answer
 
-	classBytes := make([]byte, 2)
-	binary.BigEndian.PutUint16(classBytes, 1)
-	m.Answer = append(m.Answer, classBytes...)
+	for _, ans := range answers {
+		AnswerBytes = append(AnswerBytes, getLabelSequence(ans.Name)...)
+		recordBytes := make([]byte, 2)
+		binary.BigEndian.PutUint16(recordBytes, uint16(ans.Type))
+		AnswerBytes = append(AnswerBytes, recordBytes...)
 
-	TTLBytes := make([]byte, 4)
-	binary.BigEndian.PutUint32(TTLBytes, TTL)
-	m.Answer = append(m.Answer, TTLBytes...)
+		classBytes := make([]byte, 2)
+		binary.BigEndian.PutUint16(classBytes, 1)
+		AnswerBytes = append(AnswerBytes, classBytes...)
 
-	RDataStr := strings.Split(ipAddress, ".")
-	RData := []byte{}
-	for _, ip := range RDataStr {
-		ipPart, err := strconv.Atoi(ip)
-		if err != nil {
-			panic(err)
+		TTLBytes := make([]byte, 4)
+		binary.BigEndian.PutUint32(TTLBytes, ans.TTL)
+		AnswerBytes = append(AnswerBytes, TTLBytes...)
+
+		RDataStr := strings.Split(ans.Data, ".")
+		RData := []byte{}
+		for _, ip := range RDataStr {
+			ipPart, err := strconv.Atoi(ip)
+			if err != nil {
+				panic(err)
+			}
+			RData = append(RData, byte(ipPart))
 		}
-		RData = append(RData, byte(ipPart))
+		Length := make([]byte, 2)
+		binary.BigEndian.PutUint16(Length, uint16(len(RData)))
+		AnswerBytes = append(AnswerBytes, Length...)
+		AnswerBytes = append(AnswerBytes, RData...)
 	}
-	Length := make([]byte, 2)
-	binary.BigEndian.PutUint16(Length, uint16(len(RData)))
-	m.Answer = append(m.Answer, Length...)
-	m.Answer = append(m.Answer, RData...)
+
+	msg = append(msg, AnswerBytes...)
+	return msg
 }

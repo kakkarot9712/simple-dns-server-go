@@ -3,67 +3,82 @@ package main
 import (
 	"fmt"
 	"net"
+	"os"
+	"slices"
 )
 
-// Ensures gofmt doesn't remove the "net" import in stage 1 (feel free to remove this!)
-var _ = net.ListenUDP
-
 func main() {
-	// Uncomment this block to pass the first stage
-	//
+	resolverIndex := slices.Index(os.Args, "--resolver") + 1
+	resolverHost := os.Args[resolverIndex]
+	qc := make(chan question)
+	ac := make(chan answer)
+	// Try to connect to resolver first
+	reolverUdp, err := net.ResolveUDPAddr("udp", resolverHost)
+	if err != nil {
+		panic("Resolver host resolution failed! server can't start: " + err.Error())
+	}
+	resolver, err := net.DialUDP("udp", nil, reolverUdp)
+	if err != nil {
+		panic("Connection to resolver server failed! server can't start: " + err.Error())
+	}
+	go manageResolver(resolver, qc, ac)
+
+	// Now start the server
 	udpAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:2053")
 	if err != nil {
 		fmt.Println("Failed to resolve UDP address:", err)
 		return
 	}
-
 	udpConn, err := net.ListenUDP("udp", udpAddr)
 	if err != nil {
 		fmt.Println("Failed to bind to address:", err)
 		return
 	}
 	defer udpConn.Close()
-
+	DNSMappinng := map[int]DNSMessage{}
 	buf := make([]byte, 512)
-
+	answers := map[int][]answer{}
 	for {
-		size, source, err := udpConn.ReadFromUDP(buf)
-		if err != nil {
-			fmt.Println("Error receiving data:", err)
-			break
-		}
-
-		if size == 0 {
-			continue
-		}
-
-		header := ParseHeader(buf[:12])
-		question := ParseQuestion(buf[12:size])
-
-		msg := message{}
-
-		msg.header = Header{
-			id:        header.id,
-			QR:        true,
-			OPCODE:    header.OPCODE,
-			AA:        false,
-			RD:        header.RD,
-			Questions: header.Questions,
-			Answers:   2,
-			NSCOUNT:   0,
-			ARCOunt:   0,
-		}
-
-		msg.question = question
-		ipAddress := "8.8.8.8"
-		for _, q := range question {
-			msg.FillAnswer(q.Name, q.Type, 60, ipAddress)
-		}
-
-		response := msg.Bytes()
-		_, err = udpConn.WriteToUDP(response, source)
-		if err != nil {
-			fmt.Println("Failed to send response:", err)
+		go ReadFromUDPConn(udpConn, &buf, &DNSMappinng, qc)
+		select {
+		case ans := <-ac:
+			answers[ans.Uid] = append(answers[ans.Uid], ans)
+			dns := DNSMappinng[ans.Uid]
+			if ans.ResponseHeader.OPCODE != "0000" {
+				// Not Implemented
+				msg := message{}
+				msg.header = header{
+					Id:        ans.ResponseHeader.Id,
+					QR:        true,
+					Questions: ans.ResponseHeader.Questions,
+					OPCODE:    ans.ResponseHeader.OPCODE,
+					RCODE:     ans.ResponseHeader.RCODE,
+					RD:        dns.header.RD,
+				}
+				msg.question = dns.questions
+				response := msg.Bytes()
+				go SendAnswersToSource(udpConn, response, dns.source)
+				delete(answers, ans.Uid)
+				delete(DNSMappinng, ans.Uid)
+			} else if len(answers[ans.Uid]) == len(dns.questions) {
+				msg := message{}
+				msg.header = header{
+					Id:        dns.header.Id,
+					Questions: uint16(len(dns.questions)),
+					Answers:   uint16(len(answers[ans.Uid])),
+					QR:        true,
+					OPCODE:    dns.header.OPCODE,
+					RD:        dns.header.RD,
+				}
+				msg.question = dns.questions
+				msg.Answer = answers[ans.Uid]
+				source := dns.source
+				response := msg.Bytes()
+				go SendAnswersToSource(udpConn, response, source)
+				delete(answers, ans.Uid)
+				delete(DNSMappinng, ans.Uid)
+			}
+		default:
 		}
 	}
 }
