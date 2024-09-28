@@ -1,36 +1,62 @@
-[![progress-banner](https://backend.codecrafters.io/progress/dns-server/22f2951b-ac17-4986-a128-def7a976e8d3)](https://app.codecrafters.io/users/codecrafters-bot?r=2qF)
+# Simple DNS Server
 
-This is a starting point for Go solutions to the
-["Build Your Own DNS server" Challenge](https://app.codecrafters.io/courses/dns-server/overview).
+This project is a basic DNS server implementation in Go, created as part of the CodeCrafters "Build Your Own X" challenge. It provides fundamental DNS functionality, including request decoding/encoding and request forwarding to other DNS servers.
 
-In this challenge, you'll build a DNS server that's capable of parsing and
-creating DNS packets, responding to DNS queries, handling various record types
-and doing recursive resolve. Along the way we'll learn about the DNS protocol,
-DNS packet format, root servers, authoritative servers, forwarding servers,
-various record types (A, AAAA, CNAME, etc) and more.
+## Features
 
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
+- Basic DNS request decoding and encoding
+- Request forwarding to other DNS servers
 
-# Passing the first stage
+## Getting Started
 
-The entry point for your `your_program.sh` implementation is in `app/main.go`.
-Study and uncomment the relevant code, and push your changes to pass the first
-stage:
+## Prerequisites
 
-```sh
-git commit -am "pass 1st stage" # any msg
-git push origin master
+This project requires Go to be installed on your system. If you don't have Go installed, you can download it from the official Go downloads page:
+
+[https://go.dev/dl/](https://go.dev/dl/)
+
+Choose the appropriate version for your operating system and follow the installation instructions provided on the Go website.
+
+## Installation
+
+After ensuring Go is installed on your system, follow these steps to set up Simple Git:
+
+1. Clone the repository:
+   ```
+   git clone https://github.com/kakkarot9712/simple-dns-server-go
+   ```
+
+2. Navigate to the project directory:
+   ```
+   cd simple-dns-server-go
+   ```
+
+3. Build the project:
+   ```
+   go build -o mydnsserver ./app
+   ```
+
+This will create an executable named `mydnsserver` in your project directory.
+
+### Usage
+
+- To start the DNS server, run:
+```
+./mydnsserver
+```
+The server listens on port 2053.
+
+- To start DNS server with reolver (Request forwarding), you can do so by passing `--resolver` flag along with server host and port like this:
+```
+./mydnsserver --resolver 127.0.0.1:2054
 ```
 
-Time to move on to the next stage!
+## Limitation
 
-# Stage 2 & beyond
+- This server can not resolve any DNS queries without resolver server.
+- This server only reolves A records.
+- This is very basic implimentation of DNS server with very limited features.
 
-Note: This section is for stages 2 and beyond.
+## Acknowledgments
 
-1. Ensure you have `go (1.19)` installed locally
-1. Run `./your_program.sh` to run your program, which is implemented in
-   `app/main.go`.
-1. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
+- CodeCrafters for the "Build Your Own X" challenge
